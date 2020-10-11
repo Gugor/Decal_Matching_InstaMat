@@ -267,12 +267,22 @@ class SMR_APPLYDECAL(bpy.types.Operator):
         if not group_type:
             ShowMessageBox('Something went wrong, could not find decal nodegroup', 'What the Smudge!', 'ERROR') #specific SMR function
 
+        if 'Material Base Color' in skip_list and 'Material Roughness' in skip_list and 'Material Normal' in skip_list:
+            skip_material = True
+        else:
+            skip_material = False
+        if 'Subset Base Color' in skip_list and 'Subset Roughness' in skip_list and 'Subset Normal' in skip_list:
+            skip_subset = True
+        else:
+            skip_subset = False
+
         #iterate over all outputs of the node group
         for i, output in enumerate(group.outputs):
             #adapting decalmachine node naming convention for materials: Material + same name as principled bsdf socket
             mat_input = 'Material ' + output.name
             #skips over sockets added to the skip list by user deselecting them in the popup menu
-            if mat_input in decal_group.inputs and mat_input not in skip_list:
+
+            if mat_input in decal_group.inputs and mat_input not in skip_list and not skip_material:
                 decal_links.new(group.outputs[i], decal_group.inputs[mat_input])
             #continue if the decal is not a subset decal
             if group_type == 'simple':
@@ -280,22 +290,22 @@ class SMR_APPLYDECAL(bpy.types.Operator):
             #adapting decalmachine node naming convention for subsets: Subset + same name as principled bsdf socket
             sub_input = 'Subset ' + output.name
             #skips over sockets added to the skip list by user deselecting them in the popup menu
-            if sub_input in decal_group.inputs and sub_input not in skip_list:
+            if sub_input in decal_group.inputs and sub_input not in skip_list and not skip_subset:
                 decal_links.new(group.outputs[i], decal_group.inputs[sub_input])
 
         old_principled = self.find_principled()[1]
         #get old specular default value and set it in decalgroup
         if 'Specular' not in group.outputs:
-            if 'Material Specular'not in skip_list:
+            if not skip_material:
                 decal_group.inputs['Material Specular'].default_value = old_principled.inputs['Specular'].default_value
-            if 'Subset Specular' in decal_group.inputs and 'Subset Specular' not in skip_list:
+            if 'Subset Specular' in decal_group.inputs and not skip_subset:
                 decal_group.inputs['Subset Specular'].default_value = old_principled.inputs['Specular'].default_value
 
         #get old metallic default value and set it in decalgroup
         if 'Metallic' not in group.outputs:
-            if 'Material Metallic' not in skip_list:
+            if not skip_material:
                 decal_group.inputs['Material Metallic'].default_value = old_principled.inputs['Metallic'].default_value
-            if 'Subset Metallic' in decal_group.inputs and 'Subset Metallic' not in skip_list:
+            if 'Subset Metallic' in decal_group.inputs and not skip_subset:
                 decal_group.inputs['Subset Metallic'].default_value = old_principled.inputs['Metallic'].default_value
 
         return group
@@ -365,7 +375,10 @@ class SMR_APPLYDECAL(bpy.types.Operator):
         links = obj.active_material.node_tree.links
 
         #create the UVMap node and connect it to the group
-        uv_node = nodes.new('ShaderNodeUVMap')
+        try:
+            uv_node = nodes['Source Object UV Map']
+        except:
+            uv_node = nodes.new('ShaderNodeUVMap')
         uv_node.uv_map = 'Source_UVs'
         uv_node.name = 'Source Object UV Map'
         
