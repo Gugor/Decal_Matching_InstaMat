@@ -129,11 +129,12 @@ class SMR_APPLYDECAL(bpy.types.Operator):
         return attributes
 
 
-    def copy_nodes(self, nodes, group):
+    def copy_nodes(self, nodes, group_n):
         """
         copies all nodes from the list into the group with their attributes
         """
-
+        group = bpy.data.node_groups[group_n]
+        
         #the attributes that should be copied for every link
         input_attributes = ( "default_value", "name" )
         output_attributes = ( "default_value", "name" )
@@ -153,10 +154,11 @@ class SMR_APPLYDECAL(bpy.types.Operator):
                 self.copy_attributes( output_attributes, out, new_node.outputs[i] )
 
 
-    def copy_links(self, context, nodes, group):
+    def copy_links(self, context, nodes, group_n):
         """
         copies all links between the nodes in the list to the nodes in the group
         """
+        group = bpy.data.node_groups[group_n]
 
         for node in nodes:
             #find the corresponding node in the created group
@@ -173,11 +175,11 @@ class SMR_APPLYDECAL(bpy.types.Operator):
                         pass
 
 
-    def add_group_nodes(self, group):
+    def add_group_nodes(self, group_n):
         """
         adds the group input and output node and positions them correctly
         """
-
+        group = bpy.data.node_groups[group_n]
         group_input = group.nodes.new("NodeGroupInput")
         group_output = group.nodes.new("NodeGroupOutput")
         group_output.name = 'Output'
@@ -200,10 +202,11 @@ class SMR_APPLYDECAL(bpy.types.Operator):
         group_output.location = (max_pos + 250, 0)
 
 
-    def connect_outputs(self, group):
+    def connect_outputs(self, group_n):
         """
         checks in the old copy of the material what nodes were connected to the principled bsdf and then connects the corresponding node in the new group to the outputs of the group
         """
+        group = bpy.data.node_groups[group_n]
         group_links = group.links
         group_nodes = group.nodes
         output_node = group_nodes['Output']
@@ -220,13 +223,15 @@ class SMR_APPLYDECAL(bpy.types.Operator):
                 corresponding_node = group_nodes[source]
                 
                 #connect to output
-                group_links.new(corresponding_node.outputs[socket], output_node.inputs[output_socket])
+                group.outputs.new('NodeSocketColor', inp.name)
+                socket_out = group.path_resolve('nodes["Output"].inputs[{}]'.format(output_socket))
+                group.links.new(corresponding_node.outputs[socket], socket_out)
 
                 #give the group output the same name as the principled Bsdf socket name
                 group.outputs[output_socket].name = principled_socket_name
                 output_socket += 1 
 
-    def apply_mat_to_decal(self, decal_mat, group_tree, skip_list):
+    def apply_mat_to_decal(self, decal_mat, group_n, skip_list):
         """
         adds the created nodegroup to the decal material, connecting it to the decal group. Returns the newly created group node in the decal material
         """
@@ -235,11 +240,11 @@ class SMR_APPLYDECAL(bpy.types.Operator):
         
         try: 
             #checks if the group already exists, clearing all links if it did
-            group = decal_nodes[group_tree.name]
+            group = decal_nodes[group_n]
         except:
             #creates the group if it didn't exist yet
             group = decal_nodes.new("ShaderNodeGroup")
-            group.name = group_tree.name
+            group.name = group_n
 
         link_remove_list = [] #use list to prevent gotcha
         for output in group.outputs:
@@ -248,7 +253,7 @@ class SMR_APPLYDECAL(bpy.types.Operator):
         for link in link_remove_list:
             decal_mat.node_tree.links.remove(link)
 
-        group.node_tree = group_tree
+        group.node_tree = bpy.data.node_groups[group_n]
         random_offset = random.randint(0, 200)
         group.location = (-600, 800 - random_offset) #use random position offset to prevent node stacking. Not the best way, I know, but the other function I wrote didn't work as well
 
@@ -283,7 +288,7 @@ class SMR_APPLYDECAL(bpy.types.Operator):
             #skips over sockets added to the skip list by user deselecting them in the popup menu
 
             if mat_input in decal_group.inputs and mat_input not in skip_list and not skip_material:
-                decal_links.new(group.outputs[i], decal_group.inputs[mat_input])
+                decal_mat.node_tree.links.new(group.outputs[i], decal_group.inputs[mat_input])
             #continue if the decal is not a subset decal
             if group_type == 'simple':
                 continue
@@ -291,7 +296,7 @@ class SMR_APPLYDECAL(bpy.types.Operator):
             sub_input = 'Subset ' + output.name
             #skips over sockets added to the skip list by user deselecting them in the popup menu
             if sub_input in decal_group.inputs and sub_input not in skip_list and not skip_subset:
-                decal_links.new(group.outputs[i], decal_group.inputs[sub_input])
+                decal_mat.node_tree.links.new(group.outputs[i], decal_group.inputs[sub_input])
 
         old_principled = self.find_principled()[1]
         #get old specular default value and set it in decalgroup
@@ -310,10 +315,11 @@ class SMR_APPLYDECAL(bpy.types.Operator):
 
         return group
 
-    def reroute_group_uvs(self, group):
+    def reroute_group_uvs(self, group_n):
         """
         looks for nodes that were previously connected to UV coordinates, connecting them to the input of the node group so a seperate UV channel can be used on the decal
         """
+        group = bpy.data.node_groups[group_n]
         nodes = group.nodes
         links = group.links
         group_input= nodes['Input']
@@ -328,21 +334,16 @@ class SMR_APPLYDECAL(bpy.types.Operator):
                 tex_nodes.append(node)
 
         #creates the new input as vector
-        try:
-            group.inputs.new('VECTOR', 'Original UVs')
-        except:
-            print('error found')
+        group.inputs.new('VECTOR', 'Original UVs')
+
         #iterates trough coordinate nodes, looking for nodes that were linked to the UV output of this node and linking them to the group input
         for c_node in coord_nodes:
             for node_links in c_node.outputs['UV'].links:
                 destination= node_links.to_node
                 destination_socket = node_links.to_socket.name   
-                links.new(group_input.outputs[0], destination.inputs[destination_socket])
+                group.links.new(group_input.outputs[0], destination.inputs[destination_socket])
 
-        #iterates trough texture nodes, looking for nodes that were not conneced at their vector socket, which means they use the default UV, and linking them to the group input
-        for t_node in tex_nodes:
-            if not t_node.inputs[0].links:
-                links.new(group_input.outputs[0], t_node.inputs[0])
+
 
 
         
@@ -352,6 +353,7 @@ class SMR_APPLYDECAL(bpy.types.Operator):
         """
         adds a datatransfer modifier and a new uv channel called Source_UVs. Uses datatransfer to transfer the UVs of the target object to the decal. Then creates a UVmap node with this new UV channel and connects it to the material group
         """
+     
         #look if modifier exists, otherwise creates it and sets it settings
         uv_mod = obj.modifiers.get("SMR_UVTransfer")
         if not uv_mod:
@@ -419,6 +421,7 @@ class SMR_APPLYDECAL(bpy.types.Operator):
             decal_mat.node_tree.nodes.remove(node)
 
 
+
     def execute(self, context):    
         """
         execute
@@ -433,7 +436,7 @@ class SMR_APPLYDECAL(bpy.types.Operator):
                 skip_list.append(socket_name)
 
         #remove unused node groups created previously by this operator
-        # self.remove_unused_groups()
+        self.remove_unused_groups()
 
         group_name = self.active_mat.name + '_Copy'
         #check if group exists, clears it if it does
@@ -447,18 +450,25 @@ class SMR_APPLYDECAL(bpy.types.Operator):
 
         #create the new node_group
         group = bpy.data.node_groups.new( name=group_name, type="ShaderNodeTree" )
+        group_n = group.name
+
         
         #run trough the functions for creating the actual group, all in bpy.data not in an actual material
         nodes = self.nodes_to_copy(self.active_mat)
-        self.copy_nodes( nodes, group ) 
-        self.copy_links( context, nodes, group )        
-        self.add_group_nodes(group)
-        self.reroute_group_uvs(group)
-        self.connect_outputs(group)        
+        self.copy_nodes( nodes, group_n ) 
+        self.copy_links( context, nodes, group_n )        
+        
+        self.add_group_nodes(group_n)
+        self.reroute_group_uvs(group_n)
+        self.connect_outputs(group_n)        
 
         #needs to be checked here, since the decals will become the active object during iterating
-        source_uv = context.active_object.data.uv_layers.active.name
-        
+        try:
+            source_uv = context.active_object.data.uv_layers.active.name
+        except:
+            new_uv = context.active_object.data.uv_layers.new()
+            source_uv = new_uv.name
+
         #iterates over selected objects, adding the node_group to them if they are a decal
         i = 0
         for obj in self.selected:
@@ -481,13 +491,13 @@ class SMR_APPLYDECAL(bpy.types.Operator):
                 
                 bpy.context.view_layer.objects.active = self.active_object
                 #add the group to the material and connect it
-                node_group = self.apply_mat_to_decal(decal_mat, group, skip_list)
-                
-                #remove any left over unconnected nodes from previous runs
+                self.apply_mat_to_decal(decal_mat, group_n, skip_list)
                 
                 
                 #add the custom uv channel
-                self.add_custom_uv(obj, node_group, source_uv)
+                group = decal_mat.node_tree.nodes[group_n]
+                self.add_custom_uv(obj, group, source_uv)
+                #remove any left over unconnected nodes from previous runs
                 self.remove_unconnected_nodes(decal_mat)
                 i+=1
 
