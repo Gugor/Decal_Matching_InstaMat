@@ -246,7 +246,7 @@ class SMR_APPLYDECAL(bpy.types.Operator):
             for link in output.links:
                 link_remove_list.append(link)
         for link in link_remove_list:
-            decal_links.remove(link)
+            decal_mat.node_tree.links.remove(link)
 
         group.node_tree = group_tree
         random_offset = random.randint(0, 200)
@@ -328,8 +328,10 @@ class SMR_APPLYDECAL(bpy.types.Operator):
                 tex_nodes.append(node)
 
         #creates the new input as vector
-        group.inputs.new('VECTOR', 'Original UVs')
-
+        try:
+            group.inputs.new('VECTOR', 'Original UVs')
+        except:
+            print('error found')
         #iterates trough coordinate nodes, looking for nodes that were linked to the UV output of this node and linking them to the group input
         for c_node in coord_nodes:
             for node_links in c_node.outputs['UV'].links:
@@ -414,7 +416,7 @@ class SMR_APPLYDECAL(bpy.types.Operator):
                 if not connected:
                     remove_list.append(node)
         for node in remove_list:
-            nodes.remove(node)
+            decal_mat.node_tree.nodes.remove(node)
 
 
     def execute(self, context):    
@@ -431,21 +433,20 @@ class SMR_APPLYDECAL(bpy.types.Operator):
                 skip_list.append(socket_name)
 
         #remove unused node groups created previously by this operator
-        self.remove_unused_groups()
+        # self.remove_unused_groups()
 
         group_name = self.active_mat.name + '_Copy'
         #check if group exists, clears it if it does
-        try:
-            group =bpy.data.node_groups[group_name]
-            remove_list = [] #use list to prevent deleting items while iterating trough the same items
-            for node in group.nodes:
-                remove_list.append(node)
-            for node in remove_list:
-                group.nodes.remove(node)
-        except:
-            #create the new node_group
-            group = bpy.data.node_groups.new( name=group_name, type="ShaderNodeTree" )
+        group_to_remove = None
+        for ngroup in bpy.data.node_groups:
+            if ngroup.name == group_name:
+                group_to_remove = ngroup
+        if group_to_remove:
+            bpy.data.node_groups.remove(group_to_remove)
+            print('deleted {}'.format(group_to_remove))
 
+        #create the new node_group
+        group = bpy.data.node_groups.new( name=group_name, type="ShaderNodeTree" )
         
         #run trough the functions for creating the actual group, all in bpy.data not in an actual material
         nodes = self.nodes_to_copy(self.active_mat)
@@ -483,10 +484,11 @@ class SMR_APPLYDECAL(bpy.types.Operator):
                 node_group = self.apply_mat_to_decal(decal_mat, group, skip_list)
                 
                 #remove any left over unconnected nodes from previous runs
-                self.remove_unconnected_nodes(decal_mat)
+                
                 
                 #add the custom uv channel
                 self.add_custom_uv(obj, node_group, source_uv)
+                self.remove_unconnected_nodes(decal_mat)
                 i+=1
 
         #make original active again
